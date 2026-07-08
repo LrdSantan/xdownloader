@@ -10,8 +10,10 @@ Deploy on Railway/Render:
     - Set Python buildpack, requirements.txt with fastapi, uvicorn, yt-dlp
 """
 
+import httpx
 from fastapi import FastAPI, HTTPException
 from fastapi.middleware.cors import CORSMiddleware
+from fastapi.responses import StreamingResponse
 from pydantic import BaseModel
 from extract import extract_tweet_media
 
@@ -49,3 +51,22 @@ def extract(payload: ExtractRequest):
         raise HTTPException(status_code=404, detail="No video found in this tweet")
 
     return data
+
+
+@app.get("/download")
+def download(video_url: str, filename: str = "video.mp4"):
+    """
+    Streams the video through our server so the browser can trigger a real
+    download (X's CDN URLs are signed/expiring and often block direct
+    cross-origin downloads from the browser).
+    """
+    if "twimg.com" not in video_url:
+        raise HTTPException(status_code=400, detail="Invalid video URL")
+
+    def stream():
+        with httpx.stream("GET", video_url, timeout=60) as r:
+            for chunk in r.iter_bytes(chunk_size=8192):
+                yield chunk
+
+    headers = {"Content-Disposition": f'attachment; filename="{filename}"'}
+    return StreamingResponse(stream(), media_type="video/mp4", headers=headers)
